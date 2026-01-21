@@ -11,6 +11,20 @@ from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import io
+import subprocess
+
+# وظيفة لتثبيت متصفح Playwright تلقائياً على السيرفر
+def install_playwright_browsers():
+    try:
+        subprocess.run(["playwright", "install", "chromium"], check=True)
+    except Exception as e:
+        st.error(f"Error installing browsers: {e}")
+
+# تنفيذ التثبيت عند بدء التطبيق (للمنصات السحابية مثل Streamlit Cloud)
+if 'playwright_installed' not in st.session_state:
+    with st.spinner("جاري تهيئة محرك البحث (قد يستغرق دقيقة في المرة الأولى)..."):
+        install_playwright_browsers()
+        st.session_state['playwright_installed'] = True
 
 # حل مشكلة NotImplementedError على ويندوز
 if sys.platform == 'win32':
