@@ -108,15 +108,15 @@ def scrape_google_maps(search_query, max_results=10, data_placeholder=None, prog
 
             seen_names = set()
             scroll_attempts = 0
-            # زيادة محاولات التمرير لضمان الوصول للعدد المطلوب
-            max_scroll_attempts = 30 
+            max_scroll_attempts = 50 # زيادة المحاولات للبحث العميق
             
             while len(results) < max_results and scroll_attempts < max_scroll_attempts:
-                # محاولة البحث عن العناصر بعدة طرق (Selectors متنوعة)
+                # البحث عن عناصر النتائج
                 item_selectors = [
                     'a[href*="/maps/place/"]',
                     '.hfpxzc',
-                    'div[role="article"] a'
+                    'div[role="article"] a',
+                    '.Nv262d'
                 ]
                 
                 items = []
@@ -127,9 +127,8 @@ def scrape_google_maps(search_query, max_results=10, data_placeholder=None, prog
                         break
                 
                 if not items:
-                    # إذا لم نجد عناصر، نحاول التمرير لأسفل ربما لم تتحمل بعد
                     page.mouse.wheel(0, 2000)
-                    time.sleep(3)
+                    time.sleep(2)
                     scroll_attempts += 1
                     continue
 
@@ -138,21 +137,25 @@ def scrape_google_maps(search_query, max_results=10, data_placeholder=None, prog
                         break
                         
                     try:
-                        # استخراج الاسم من الـ aria-label أو النص
-                        card_name = item.get_attribute("aria-label") or item.inner_text().split('\n')[0]
+                        # استخراج الاسم للتحقق من التكرار قبل النقر
+                        card_name = item.get_attribute("aria-label")
+                        if not card_name:
+                            try:
+                                card_name = item.inner_text().split('\n')[0]
+                            except:
+                                continue
+                                
                         if not card_name or card_name in seen_names or "N/A" in card_name:
                             continue
                         
-                        # النقر على العنصر مع محاولة التمرير إليه أولاً
+                        # التمرير للعنصر والنقر
                         item.scroll_into_view_if_needed()
-                        item.click(force=True)
-                        time.sleep(3) # زيادة وقت الانتظار للتحميل
+                        item.click(force=True, timeout=5000)
+                        time.sleep(2) # انتظار تحميل التفاصيل
                         
-                        # استخراج البيانات من اللوحة الجانبية
+                        # محددات الأسماء
                         name = "N/A"
-                        # محددات أسماء المؤسسات الأكثر شيوعاً حالياً
-                        name_selectors = ['h1.DUwDvf', 'h1.lfPIob', 'h1']
-                        for selector in name_selectors:
+                        for selector in ['h1.DUwDvf', 'h1.lfPIob', 'h1.fontHeadlineLarge', 'h1']:
                             if page.locator(selector).count() > 0:
                                 name = page.locator(selector).first.inner_text()
                                 break
@@ -162,10 +165,10 @@ def scrape_google_maps(search_query, max_results=10, data_placeholder=None, prog
                             
                         seen_names.add(name)
                         
-                        # استخراج باقي التفاصيل
+                        # استخراج البيانات
                         page_content = page.content()
                         emails_in_maps = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', page_content)
-                        emails_in_maps = [e for e in emails_in_maps if not any(x in e.lower() for x in ['google', 'sentry', 'wix', 'example', 'domain', 'png', 'jpg'])]
+                        emails_in_maps = [e for e in emails_in_maps if not any(x in e.lower() for x in ['google', 'sentry', 'wix', 'example', 'domain', 'png', 'jpg', 'webp'])]
 
                         address = "N/A"
                         address_loc = page.locator('button[data-item-id="address"]')
@@ -202,15 +205,22 @@ def scrape_google_maps(search_query, max_results=10, data_placeholder=None, prog
                     except Exception:
                         continue
                 
-                # التمرير لتحميل المزيد
-                feed_selector = 'div[role="feed"]'
-                if page.locator(feed_selector).count() > 0:
-                    page.locator(feed_selector).evaluate("el => el.scrollBy(0, 2000)")
-                else:
-                    page.mouse.wheel(0, 2000)
+                # التمرير لأسفل القائمة لتحميل المزيد
+                try:
+                    feed = page.locator('div[role="feed"]')
+                    if feed.count() > 0:
+                        feed.evaluate("el => el.scrollBy(0, 3000)")
+                    else:
+                        page.mouse.wheel(0, 3000)
+                except:
+                    page.mouse.wheel(0, 3000)
                 
-                time.sleep(3)
+                time.sleep(2)
                 scroll_attempts += 1
+                
+                # تحقق من ظهور رسالة "وصلت إلى نهاية القائمة"
+                if "You've reached the end of the list" in page.content() or "لقد وصلت إلى نهاية القائمة" in page.content():
+                    break
                     
             browser.close()
             return results
@@ -219,17 +229,29 @@ def scrape_google_maps(search_query, max_results=10, data_placeholder=None, prog
             return results
 
 # إعدادات الواجهة
-st.set_page_config(page_title="مستخرج بيانات خرائط جوجل", layout="wide")
+st.set_page_config(page_title="مستخرج بيانات خرائط جوجل", layout="wide", initial_sidebar_state="expanded")
 
 # تصميم عصري وأنيق مع تجاوز تنسيقات Streamlit
 style_code = """<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet"><style>
-    body, .stApp { font-family: 'Tajawal', sans-serif !important; direction: RTL !important; text-align: right !important; background-color: #F0F2F6 !important; }
+    body, .stApp { font-family: 'Tajawal', sans-serif !important; direction: RTL !important; text-align: right !important; background-color: #F8FAFC !important; }
     h1, h2, h3, p, span, label { font-family: 'Tajawal', sans-serif !important; text-align: right !important; color: #1E3A8A !important; }
     
+    /* تنسيق شريط التمرير الجانبي */
+    [data-testid="stSidebar"] {
+        background-color: #FFFFFF !important;
+        border-left: 1px solid #E2E8F0 !important;
+    }
+    
+    [data-testid="stSidebar"] .stMarkdown h3 {
+        color: #2563EB !important;
+        border-bottom: 2px solid #F1F5F9;
+        padding-bottom: 10px;
+    }
+
     /* تنسيق مربعات الإدخال */
     .stTextInput div[data-baseweb="input"], .stNumberInput div[data-baseweb="input"] {
-        border: 2px solid #2563EB !important;
-        border-radius: 12px !important;
+        border: 1px solid #CBD5E1 !important;
+        border-radius: 8px !important;
         background-color: white !important;
     }
     
@@ -238,8 +260,8 @@ style_code = """<link href="https://fonts.googleapis.com/css2?family=Tajawal:wgh
         direction: LTR !important;
         text-align: left !important;
         background-color: white !important;
-        border-radius: 10px !important;
-        padding: 10px !important;
+        border-radius: 12px !important;
+        box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1) !important;
     }
     
     /* إخفاء الرسائل المزعجة */
@@ -249,30 +271,20 @@ style_code = """<link href="https://fonts.googleapis.com/css2?family=Tajawal:wgh
     .stButton button {
         background-color: #2563EB !important;
         color: white !important;
-        border-radius: 12px !important;
-        padding: 0.5rem 1rem !important;
+        border-radius: 8px !important;
+        padding: 0.6rem 1rem !important;
         width: 100% !important;
         font-weight: bold !important;
         font-family: 'Tajawal', sans-serif !important;
-        font-size: 1.1rem !important;
         border: none !important;
-        transition: all 0.3s ease !important;
-        height: 45px !important;
+        transition: all 0.2s ease !important;
     }
 
-    .stButton button p {
-        color: white !important;
-    }
+    .stButton button p { color: white !important; }
     
-    .stButton button:hover, .stButton button:active, .stButton button:focus {
+    .stButton button:hover {
         background-color: #1E40AF !important;
-        color: white !important;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06) !important;
-        transform: translateY(-1px) !important;
-    }
-
-    .stButton button:hover p {
-        color: white !important;
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2) !important;
     }
     
     # MainMenu, footer, header { visibility: hidden !important; }
@@ -285,10 +297,10 @@ style_code = """<link href="https://fonts.googleapis.com/css2?family=Tajawal:wgh
         background-color: #1E3A8A;
         color: white;
         text-align: center;
-        padding: 10px 0;
+        padding: 8px 0;
         font-family: 'Tajawal', sans-serif;
         z-index: 100;
-        border-top: 3px solid #2563EB;
+        font-size: 0.9rem;
     }
     </style>"""
 st.markdown(style_code, unsafe_allow_html=True)
@@ -302,23 +314,25 @@ st.markdown("""
 
 st.title("🔍 نظام استخراج البيانات الذكي")
 
-# تنظيم المدخلات بشكل أنيق
-with st.container():
+# تنظيم المدخلات في الشريط الجانبي
+with st.sidebar:
     st.markdown("### 🛠️ إعدادات البحث")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        business_type = st.text_input("مجال المؤسسة", placeholder="مطاعم، فنادق...")
-    with col2:
-        city = st.text_input("المدينة", placeholder="الرياض، دبي...")
-    with col3:
-        country = st.text_input("الدولة", placeholder="السعودية...")
-
-    col_res, col_btn = st.columns([1, 2])
-    with col_res:
-        max_res = st.number_input("عدد النتائج المطلوبة", min_value=1, max_value=500, value=10, step=1)
-    with col_btn:
-        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True) # موازنة المسافة مع العنوان
-        search_clicked = st.button("🚀 ابدأ عملية الاستخراج الآن")
+    business_type = st.text_input("مجال المؤسسة", placeholder="مطاعم، فنادق...")
+    city = st.text_input("المدينة", placeholder="الرياض، دبي...")
+    country = st.text_input("الدولة", placeholder="السعودية...")
+    max_res = st.number_input("عدد النتائج المطلوبة", min_value=1, max_value=500, value=10, step=1)
+    
+    st.markdown("---")
+    search_clicked = st.button("🚀 ابدأ عملية الاستخراج")
+    
+    st.markdown("### 📖 تعليمات الاستخدام")
+    st.info("""
+    1. أدخل نوع النشاط التجاري.
+    2. حدد المدينة والدولة بدقة.
+    3. اختر عدد النتائج (الحد الأقصى 500).
+    4. اضغط على زر البدء وانتظر النتائج.
+    5. يمكنك تحميل البيانات بصيغة Word أو CSV.
+    """)
 
 def create_word_doc(data):
     doc = Document()
