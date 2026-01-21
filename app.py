@@ -282,7 +282,7 @@ st.markdown(style_code, unsafe_allow_html=True)
 # إضافة حقوق المطور في الأسفل
 st.markdown("""
     <div class="developer-footer">
-        👨‍💻 تطوير: <b>عبدالمنعم حاتم</b> | 📞: 0544451878 | 📧: info@mohatim.tech
+        👨‍💻 تطوير: <b>عبدالمنعم حاتم</b> | 📞: +966544451878 | 📧: info@mohatim.tech
     </div>
     """, unsafe_allow_html=True)
 
@@ -347,7 +347,7 @@ def create_word_doc(data):
     
     dev_contact = doc.add_paragraph()
     dev_contact.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run2 = dev_contact.add_run("تطوير: عبدالمنعم حاتم | جوال: 0544451878 | ايميل: info@mohatim.tech")
+    run2 = dev_contact.add_run("تطوير: عبدالمنعم حاتم | جوال: +966544451878 | ايميل: info@mohatim.tech")
     run2.font.size = Pt(10)
     run2.bold = True
 
