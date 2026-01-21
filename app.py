@@ -83,7 +83,6 @@ def scrape_google_maps(search_query, max_results=10, data_placeholder=None, prog
             page = context.new_page()
             results = []
             
-            try:
             # استخدام wait_until="load" بدلاً من networkidle لتجنب التعليق
             page.goto(f"https://www.google.com/maps/search/{search_query}", wait_until="load", timeout=60000)
             time.sleep(5)
