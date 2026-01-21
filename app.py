@@ -66,16 +66,10 @@ def extract_emails_from_url(url):
         return "N/A"
 
 def scrape_google_maps(search_query, max_results=10, data_placeholder=None, progress_bar=None):
-    # التأكد من تثبيت المتصفح قبل البدء (حل أخير للسيرفرات السحابية)
-    try:
-        subprocess.run(["python", "-m", "playwright", "install", "chromium"], check=True)
-    except:
-        pass
-
     with sync_playwright() as p:
         results = []
         try:
-            # استخدام إعدادات متقدمة لتجنب الاكتشاف
+            # استخدام إعدادات متقدمة لتجنب الاكتشاف ومحاكاة إنسان
             browser = p.chromium.launch(headless=True, args=[
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
@@ -84,49 +78,60 @@ def scrape_google_maps(search_query, max_results=10, data_placeholder=None, prog
             context = browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
                 locale="ar-SA",
-                viewport={'width': 1280, 'height': 800}
+                viewport={'width': 1920, 'height': 1080}
             )
             page = context.new_page()
             
             # منع اكتشاف المتصفح كآلي
             page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             
-            # الانتقال مع انتظار كافٍ
-            search_url = f"https://www.google.com/maps/search/{search_query}"
-            page.goto(search_url, wait_until="networkidle", timeout=90000)
+            # 1. الذهاب للموقع الرئيسي أولاً لتضليل أنظمة الكشف
+            st.toast("🔍 جاري الدخول إلى خرائط جوجل...")
+            page.goto("https://www.google.com/maps?hl=ar", wait_until="domcontentloaded", timeout=60000)
+            time.sleep(4)
             
-            # محاولة تخطي أي نوافذ منبثقة أو ملفات تعريف الارتباط
+            # محاولة تخطي أي نوافذ منبثقة للموافقة
             try:
-                page.wait_for_selector('button[aria-label*="Accept"], button[aria-label*="قبول"]', timeout=5000)
-                page.click('button[aria-label*="Accept"], button[aria-label*="قبول"]')
-            except:
-                pass
+                consent_btn = page.locator('button:has-text("قبول"), button:has-text("وافق"), button:has-text("Accept")').first
+                if consent_btn.is_visible():
+                    consent_btn.click()
+                    time.sleep(2)
+            except: pass
 
-            # الانتظار حتى ظهور أي عنصر من عناصر النتائج
-            try:
-                page.wait_for_selector('div[role="feed"], .m67e60, a[href*="/maps/place/"]', timeout=20000)
-            except:
-                # إذا لم يظهر الفيد، قد يكون هناك نتيجة واحدة فقط مباشرة
-                if page.locator('h1.DUwDvf').count() > 0:
-                    pass # سنعالج هذه الحالة لاحقاً
-                else:
-                    browser.close()
-                    return []
+            # 2. استخدام مربع البحث بدلاً من الرابط المباشر
+            st.toast(f"📝 جاري البحث عن: {search_query}")
+            search_box = page.locator('#searchboxinput')
+            search_box.wait_for(state="visible", timeout=20000)
+            search_box.fill(search_query)
+            page.keyboard.press("Enter")
+            
+            # الانتظار حتى تحميل النتائج الأولية
+            time.sleep(6)
 
             seen_names = set()
             scroll_attempts = 0
             max_scroll_attempts = 60 
             
             while len(results) < max_results and scroll_attempts < max_scroll_attempts:
-                # محددات العناصر المحدثة
-                item_selectors = [
-                    '.Nv262d', 
-                    '.hfpxzc', 
-                    'a[href*="/maps/place/"]',
-                    'div[role="article"]'
-                ]
-                
-                # جلب كل العناصر المتاحة حالياً
+                # التحقق مما إذا كانت هناك نتيجة واحدة مباشرة (صفحة مؤسسة مفتوحة)
+                if page.locator('h1.DUwDvf').count() > 0:
+                    name = page.locator('h1.DUwDvf').first.inner_text()
+                    if name not in seen_names:
+                        address = page.locator('button[data-item-id="address"]').first.inner_text() if page.locator('button[data-item-id="address"]').count() > 0 else "N/A"
+                        phone = page.locator('button[data-item-id^="phone:tel:"]').first.inner_text() if page.locator('button[data-item-id^="phone:tel:"]').count() > 0 else "N/A"
+                        website = page.locator('a[data-item-id="authority"]').first.get_attribute('href') if page.locator('a[data-item-id="authority"]').count() > 0 else "N/A"
+                        
+                        results.append({
+                            "🏢 اسم المؤسسة": name, "📞 رقم الهاتف": phone, "🌐 الموقع الالكتروني": website,
+                            "📧 الايميل": extract_emails_from_url(website) if website != "N/A" else "N/A",
+                            "📍 موقع المكتب": address
+                        })
+                        seen_names.add(name)
+                        if data_placeholder: data_placeholder.dataframe(pd.DataFrame(results), use_container_width=True)
+                        if max_results == 1: break # إذا طلب نتيجة واحدة وجدناها
+
+                # البحث عن عناصر النتائج في القائمة
+                item_selectors = ['.Nv262d', '.hfpxzc', 'a[href*="/maps/place/"]']
                 items = []
                 for sel in item_selectors:
                     found = page.locator(sel).all()
@@ -135,100 +140,54 @@ def scrape_google_maps(search_query, max_results=10, data_placeholder=None, prog
                         break
                 
                 if not items:
-                    # محاولة التمرير لإجبار التحميل
-                    page.mouse.wheel(0, 3000)
+                    page.mouse.wheel(0, 2000)
                     time.sleep(3)
                     scroll_attempts += 1
                     continue
 
                 for item in items:
-                    if len(results) >= max_results:
-                        break
-                        
+                    if len(results) >= max_results: break
                     try:
-                        # الحصول على الاسم بطريقة أكثر مرونة
-                        name_text = ""
-                        if item.get_attribute("aria-label"):
-                            name_text = item.get_attribute("aria-label")
-                        else:
-                            name_text = item.inner_text().split('\n')[0]
+                        # الحصول على الاسم الأولي للتحقق
+                        name_text = item.get_attribute("aria-label") or item.inner_text().split('\n')[0]
+                        if not name_text or name_text in seen_names: continue
 
-                        if not name_text or name_text in seen_names:
-                            continue
-
-                        # النقر باستخدام JavaScript لتجنب مشاكل التغطية (Overlays)
                         item.scroll_into_view_if_needed()
                         item.click(force=True, timeout=10000)
-                        
-                        # انتظار تحميل لوحة التفاصيل
-                        page.wait_for_selector('.DUwDvf', timeout=10000)
-                        time.sleep(1) # وقت قصير للاستقرار
+                        time.sleep(2) # انتظار تحميل التفاصيل
                         
                         # استخراج البيانات من اللوحة الجانبية
-                        name = page.locator('.DUwDvf').first.inner_text() if page.locator('.DUwDvf').count() > 0 else name_text
-                        
-                        if name in seen_names:
-                            continue
-                        
-                        seen_names.add(name)
-                        
-                        # استخراج باقي التفاصيل بمحددات أكثر ثباتاً
-                        address = "N/A"
-                        if page.locator('button[data-item-id="address"]').count() > 0:
-                            address = page.locator('button[data-item-id="address"]').first.inner_text()
-                        
-                        phone = "N/A"
-                        if page.locator('button[data-item-id^="phone:tel:"]').count() > 0:
-                            phone = page.locator('button[data-item-id^="phone:tel:"]').first.inner_text()
-                        
-                        website = "N/A"
-                        if page.locator('a[data-item-id="authority"]').count() > 0:
-                            website = page.locator('a[data-item-id="authority"]').first.get_attribute('href')
-                        
-                        # البحث عن الايميلات
-                        email = "N/A"
-                        # محاولة سريعة من محتوى الصفحة الحالية
-                        emails_found = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', page.content())
-                        emails_found = [e for e in emails_found if not any(x in e.lower() for x in ['google', 'sentry', 'wix', 'example', 'domain', 'png', 'jpg', 'webp'])]
-                        
-                        if emails_found:
-                            email = emails_found[0]
-                        elif website != "N/A":
-                            email = extract_emails_from_url(website)
-
-                        new_entry = {
-                            "🏢 اسم المؤسسة": name,
-                            "📞 رقم الهاتف": phone,
-                            "🌐 الموقع الالكتروني": website,
-                            "📧 الايميل": email,
-                            "📍 موقع المكتب": address
-                        }
-                        results.append(new_entry)
-                        
-                        if progress_bar:
-                            progress_bar.progress(len(results) / max_results)
-                        if data_placeholder:
-                            data_placeholder.dataframe(pd.DataFrame(results), use_container_width=True)
+                        name_loc = page.locator('h1.DUwDvf')
+                        if name_loc.count() > 0:
+                            side_name = name_loc.first.inner_text()
+                            if side_name in seen_names: continue
                             
-                    except Exception:
-                        continue
+                            address = page.locator('button[data-item-id="address"]').first.inner_text() if page.locator('button[data-item-id="address"]').count() > 0 else "N/A"
+                            phone = page.locator('button[data-item-id^="phone:tel:"]').first.inner_text() if page.locator('button[data-item-id^="phone:tel:"]').count() > 0 else "N/A"
+                            website = page.locator('a[data-item-id="authority"]').first.get_attribute('href') if page.locator('a[data-item-id="authority"]').count() > 0 else "N/A"
+                            
+                            results.append({
+                                "🏢 اسم المؤسسة": side_name, "📞 رقم الهاتف": phone, "🌐 الموقع الالكتروني": website,
+                                "📧 الايميل": extract_emails_from_url(website) if website != "N/A" else "N/A",
+                                "📍 موقع المكتب": address
+                            })
+                            seen_names.add(side_name)
+                            if progress_bar: progress_bar.progress(len(results) / max_results)
+                            if data_placeholder: data_placeholder.dataframe(pd.DataFrame(results), use_container_width=True)
+                    except: continue
                 
-                # التمرير لأسفل القائمة
+                # التمرير لأسفل لتحميل المزيد
                 try:
-                    # استهداف حاوية القائمة مباشرة إذا وجدت
                     feed = page.locator('div[role="feed"]')
                     if feed.count() > 0:
-                        feed.evaluate("el => el.scrollBy(0, 5000)")
+                        feed.evaluate("el => el.scrollBy(0, 4000)")
                     else:
-                        page.mouse.wheel(0, 5000)
-                except:
-                    page.mouse.wheel(0, 5000)
+                        page.mouse.wheel(0, 4000)
+                except: page.mouse.wheel(0, 4000)
                 
                 time.sleep(3)
                 scroll_attempts += 1
-                
-                if "وصلت إلى نهاية القائمة" in page.content() or "reached the end" in page.content():
-                    break
+                if "reached the end" in page.content() or "نهاية القائمة" in page.content(): break
                     
             browser.close()
             return results
