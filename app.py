@@ -66,17 +66,24 @@ def extract_emails_from_url(url):
         return "N/A"
 
 def scrape_google_maps(search_query, max_results=10, data_placeholder=None, progress_bar=None):
+    # التأكد من تثبيت المتصفح قبل البدء (حل أخير للسيرفرات السحابية)
+    try:
+        subprocess.run(["python", "-m", "playwright", "install", "chromium"], check=True)
+    except:
+        pass
+
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            locale="ar-SA",
-            viewport={'width': 1920, 'height': 1080}
-        )
-        page = context.new_page()
-        results = []
-        
         try:
+            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                locale="ar-SA",
+                viewport={'width': 1920, 'height': 1080}
+            )
+            page = context.new_page()
+            results = []
+            
+            try:
             # استخدام wait_until="load" بدلاً من networkidle لتجنب التعليق
             page.goto(f"https://www.google.com/maps/search/{search_query}", wait_until="load", timeout=60000)
             time.sleep(5)
