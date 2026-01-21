@@ -4,17 +4,33 @@ from playwright.sync_api import sync_playwright
 try:
     from playwright_stealth import stealth_sync
 except ImportError:
-    stealth_sync = None # التعامل مع حالة عدم وجود المكتبة
+    stealth_sync = None 
 import time
 import re
 import requests
 import io
+import os
+import subprocess
 from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
+# دالة لتثبيت متصفح Playwright إذا لم يكن موجوداً
+def ensure_playwright_installed():
+    try:
+        # محاولة تشغيل أمر التثبيت (سيتم تجاهله إذا كان موجوداً بالفعل في بعض البيئات)
+        subprocess.run(["playwright", "install", "chromium"], check=True)
+    except Exception as e:
+        st.error(f"فشل تثبيت Playwright: {e}")
+
 # إعداد الصفحة
 st.set_page_config(page_title="مستخرج بيانات خرائط جوجل", layout="wide")
+
+# تنفيذ التثبيت عند بدء التطبيق
+if 'playwright_installed' not in st.session_state:
+    with st.spinner("جاري تهيئة المتصفح... قد يستغرق هذا دقيقة في المرة الأولى"):
+        ensure_playwright_installed()
+        st.session_state.playwright_installed = True
 
 # تصميم الواجهة
 st.markdown("""<style>
