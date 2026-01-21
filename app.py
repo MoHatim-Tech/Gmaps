@@ -92,33 +92,41 @@ def scrape_google_maps(search_query, max_results=10, data_placeholder=None, prog
             page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             
             # الانتقال مع انتظار كافٍ
-            page.goto(f"https://www.google.com/maps/search/{search_query}", wait_until="domcontentloaded", timeout=60000)
-            time.sleep(10) # زيادة الوقت للسماح بتحميل النتائج تماماً
+            search_url = f"https://www.google.com/maps/search/{search_query}"
+            page.goto(search_url, wait_until="networkidle", timeout=90000)
             
-            # معالجة متقدمة لصفحة الموافقة
+            # محاولة تخطي أي نوافذ منبثقة أو ملفات تعريف الارتباط
             try:
-                if "consent" in page.url or page.locator('button[aria-label*="Accept all"]').count() > 0:
-                    for selector in ['button[aria-label*="Accept all"]', 'button[aria-label*="وافق"]', 'button[aria-label*="قبول"]', 'button:has-text("Accept all")']:
-                        if page.locator(selector).count() > 0:
-                            page.locator(selector).first.click()
-                            page.wait_for_load_state("networkidle")
-                            break
+                page.wait_for_selector('button[aria-label*="Accept"], button[aria-label*="قبول"]', timeout=5000)
+                page.click('button[aria-label*="Accept"], button[aria-label*="قبول"]')
             except:
                 pass
 
+            # الانتظار حتى ظهور أي عنصر من عناصر النتائج
+            try:
+                page.wait_for_selector('div[role="feed"], .m67e60, a[href*="/maps/place/"]', timeout=20000)
+            except:
+                # إذا لم يظهر الفيد، قد يكون هناك نتيجة واحدة فقط مباشرة
+                if page.locator('h1.DUwDvf').count() > 0:
+                    pass # سنعالج هذه الحالة لاحقاً
+                else:
+                    browser.close()
+                    return []
+
             seen_names = set()
             scroll_attempts = 0
-            max_scroll_attempts = 50 # زيادة المحاولات للبحث العميق
+            max_scroll_attempts = 60 
             
             while len(results) < max_results and scroll_attempts < max_scroll_attempts:
-                # البحث عن عناصر النتائج
+                # محددات العناصر المحدثة
                 item_selectors = [
+                    '.Nv262d', 
+                    '.hfpxzc', 
                     'a[href*="/maps/place/"]',
-                    '.hfpxzc',
-                    'div[role="article"] a',
-                    '.Nv262d'
+                    'div[role="article"]'
                 ]
                 
+                # جلب كل العناصر المتاحة حالياً
                 items = []
                 for sel in item_selectors:
                     found = page.locator(sel).all()
@@ -127,8 +135,9 @@ def scrape_google_maps(search_query, max_results=10, data_placeholder=None, prog
                         break
                 
                 if not items:
-                    page.mouse.wheel(0, 2000)
-                    time.sleep(2)
+                    # محاولة التمرير لإجبار التحميل
+                    page.mouse.wheel(0, 3000)
+                    time.sleep(3)
                     scroll_attempts += 1
                     continue
 
@@ -137,54 +146,53 @@ def scrape_google_maps(search_query, max_results=10, data_placeholder=None, prog
                         break
                         
                     try:
-                        # استخراج الاسم للتحقق من التكرار قبل النقر
-                        card_name = item.get_attribute("aria-label")
-                        if not card_name:
-                            try:
-                                card_name = item.inner_text().split('\n')[0]
-                            except:
-                                continue
-                                
-                        if not card_name or card_name in seen_names or "N/A" in card_name:
+                        # الحصول على الاسم بطريقة أكثر مرونة
+                        name_text = ""
+                        if item.get_attribute("aria-label"):
+                            name_text = item.get_attribute("aria-label")
+                        else:
+                            name_text = item.inner_text().split('\n')[0]
+
+                        if not name_text or name_text in seen_names:
                             continue
-                        
-                        # التمرير للعنصر والنقر
+
+                        # النقر باستخدام JavaScript لتجنب مشاكل التغطية (Overlays)
                         item.scroll_into_view_if_needed()
-                        item.click(force=True, timeout=5000)
-                        time.sleep(2) # انتظار تحميل التفاصيل
+                        item.click(force=True, timeout=10000)
                         
-                        # محددات الأسماء
-                        name = "N/A"
-                        for selector in ['h1.DUwDvf', 'h1.lfPIob', 'h1.fontHeadlineLarge', 'h1']:
-                            if page.locator(selector).count() > 0:
-                                name = page.locator(selector).first.inner_text()
-                                break
+                        # انتظار تحميل لوحة التفاصيل
+                        page.wait_for_selector('.DUwDvf', timeout=10000)
+                        time.sleep(1) # وقت قصير للاستقرار
                         
-                        if name == "N/A" or name in seen_names:
+                        # استخراج البيانات من اللوحة الجانبية
+                        name = page.locator('.DUwDvf').first.inner_text() if page.locator('.DUwDvf').count() > 0 else name_text
+                        
+                        if name in seen_names:
                             continue
-                            
+                        
                         seen_names.add(name)
                         
-                        # استخراج البيانات
-                        page_content = page.content()
-                        emails_in_maps = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', page_content)
-                        emails_in_maps = [e for e in emails_in_maps if not any(x in e.lower() for x in ['google', 'sentry', 'wix', 'example', 'domain', 'png', 'jpg', 'webp'])]
-
+                        # استخراج باقي التفاصيل بمحددات أكثر ثباتاً
                         address = "N/A"
-                        address_loc = page.locator('button[data-item-id="address"]')
-                        if address_loc.count() > 0: address = address_loc.first.inner_text()
+                        if page.locator('button[data-item-id="address"]').count() > 0:
+                            address = page.locator('button[data-item-id="address"]').first.inner_text()
                         
                         phone = "N/A"
-                        phone_loc = page.locator('button[data-item-id^="phone:tel:"]')
-                        if phone_loc.count() > 0: phone = phone_loc.first.inner_text()
+                        if page.locator('button[data-item-id^="phone:tel:"]').count() > 0:
+                            phone = page.locator('button[data-item-id^="phone:tel:"]').first.inner_text()
                         
                         website = "N/A"
-                        website_loc = page.locator('a[data-item-id="authority"]')
-                        if website_loc.count() > 0: website = website_loc.first.get_attribute('href')
+                        if page.locator('a[data-item-id="authority"]').count() > 0:
+                            website = page.locator('a[data-item-id="authority"]').first.get_attribute('href')
                         
+                        # البحث عن الايميلات
                         email = "N/A"
-                        if emails_in_maps:
-                            email = emails_in_maps[0]
+                        # محاولة سريعة من محتوى الصفحة الحالية
+                        emails_found = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', page.content())
+                        emails_found = [e for e in emails_found if not any(x in e.lower() for x in ['google', 'sentry', 'wix', 'example', 'domain', 'png', 'jpg', 'webp'])]
+                        
+                        if emails_found:
+                            email = emails_found[0]
                         elif website != "N/A":
                             email = extract_emails_from_url(website)
 
@@ -205,21 +213,21 @@ def scrape_google_maps(search_query, max_results=10, data_placeholder=None, prog
                     except Exception:
                         continue
                 
-                # التمرير لأسفل القائمة لتحميل المزيد
+                # التمرير لأسفل القائمة
                 try:
+                    # استهداف حاوية القائمة مباشرة إذا وجدت
                     feed = page.locator('div[role="feed"]')
                     if feed.count() > 0:
-                        feed.evaluate("el => el.scrollBy(0, 3000)")
+                        feed.evaluate("el => el.scrollBy(0, 5000)")
                     else:
-                        page.mouse.wheel(0, 3000)
+                        page.mouse.wheel(0, 5000)
                 except:
-                    page.mouse.wheel(0, 3000)
+                    page.mouse.wheel(0, 5000)
                 
-                time.sleep(2)
+                time.sleep(3)
                 scroll_attempts += 1
                 
-                # تحقق من ظهور رسالة "وصلت إلى نهاية القائمة"
-                if "You've reached the end of the list" in page.content() or "لقد وصلت إلى نهاية القائمة" in page.content():
+                if "وصلت إلى نهاية القائمة" in page.content() or "reached the end" in page.content():
                     break
                     
             browser.close()
