@@ -73,6 +73,7 @@ def scrape_google_maps(search_query, max_results=10, data_placeholder=None, prog
         pass
 
     with sync_playwright() as p:
+        results = []
         try:
             browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
             context = browser.new_context(
@@ -81,7 +82,6 @@ def scrape_google_maps(search_query, max_results=10, data_placeholder=None, prog
                 viewport={'width': 1920, 'height': 1080}
             )
             page = context.new_page()
-            results = []
             
             # استخدام wait_until="load" بدلاً من networkidle لتجنب التعليق
             page.goto(f"https://www.google.com/maps/search/{search_query}", wait_until="load", timeout=60000)
